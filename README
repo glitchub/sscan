@@ -1,0 +1,28 @@
+A simple python3 script to quickly scan subnets for active SSH or VNC servers.
+
+You may specify specific IPs and CIDR subnets on the command line, otherwise
+sscan will try various techniques to identify locally connected subnets and
+scan those.
+
+Examples:
+
+    $ ./sscan
+    Scanning 192.168.0.0/23 for SSH servers...
+      192.168.0.5     : SSH-2.0-OpenSSH_7.4p1 Debian-10+deb9u7
+      192.168.0.3     : SSH-2.0-OpenSSH_7.6
+      192.168.1.143   : SSH-2.0-OpenSSH_7.9p1 Raspbian-10+deb10u2
+    3 servers found
+
+    $ ./sscan -v 10.0.0.0/18 192.168.0.5
+    Scanning 10.0.0.0/18, 192.168.0.5 for VNC servers...
+    Warning, scanning 16385 hosts may take over 1 minute!
+      192.168.0.5     : RFB 003.008
+
+The nominal scan rate is 256 hosts per second, a warning is printed if the
+projected scan time exceeds one minute.
+
+Responding IPs are printed to stdout, all other messages go to stderr.
+
+Exit status 0 if at least one host is identified, or 1 if no hosts (or an error).
+
+Tested on Linux and Windows, also should work with python2.

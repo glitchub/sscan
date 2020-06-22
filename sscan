@@ -1,0 +1,162 @@
+#!/usr/bin/python3
+
+# MIT License
+#
+# Copyright (c) 2020 Rich Leggitt
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Usage:
+#
+#     sscan [-v] [ip[/mask] [ ... ip[/mask]]]
+#
+# Scan one or more subnets for SSH/VNC servers.
+
+from __future__ import print_function
+import sys, struct, socket, threading, time, subprocess, platform, traceback
+
+# Timeout seconds per scan
+timeout = 0.2
+
+# Number of simultaneous scans, don't exceed the ARP cache size!
+concurrent = 64
+
+# Convert dotted-quad to (native) int
+def aton(ip):
+    return struct.unpack(">I", struct.pack("BBBB", *[int(o) for o in ip.split('.')]))[0]
+
+# Convert int to dotted-quad
+def ntoa(n):
+    return "%d.%d.%d.%d" % struct.unpack('BBBB', struct.pack(">I", n))
+
+# Convert str/bytes to str
+def to_str(o):
+    if type(o) is not str: return o.decode('utf-8','ignore')
+    return o
+
+# This is started multple times as a thread. Try to connect to designated host
+# and tcp port within 'timeout' seconbds, increment global 'found' and print a
+# message if so, and exit.
+found = 0                   # total successful scans
+lock = threading.Lock()     # arbitrate access to 'found'
+def scan(ip, port):
+    global found
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    if not sock.connect_ex((ip, port)):
+        try: s = sock.recv(64)
+        except: s = "unknown"
+        lock.acquire()
+        found += 1
+        print("  %-15s :" % ip, to_str(s).splitlines()[0])
+        lock.release()
+    sock.close()
+
+# Iterate all addresses in specified netlist, e.g. "192.168.0.0/24" will expand to
+# "192.168.0.1", "192.168.0.2", etc
+def netlist(network):
+    if not '/' in network: yield network
+    else:
+        network,netmask = network.split('/',1)
+        if netmask == "32": yield network
+        else:
+            shift = 32 - int(netmask)
+            base = aton(network) & (0xffffffff << shift)
+            # skip first and last IP in the range
+            for i in range(1, (1 << shift) - 1):
+                yield ntoa(base+i)
+
+# Handle the -v option
+scanvnc = False
+try:
+    if sys.argv[1] == '-v':
+        scanvnc = True
+        del(sys.argv[1])
+except: pass
+
+# Get list of networks from command like
+networks=sys.argv[1:]
+
+if not networks:
+    # None given, try to figure it out.
+
+    # Filter list for "non-routable" address blocks
+    allow=("10.", "192.168.") + tuple(["172.%d." % n for n in range(16,32)])
+    def nonroutable(l): return [n for n in l if n.startswith(allow)]
+
+    try:
+        if platform.system().lower().startswith(("windows","cygwin")):
+            # On windows, ask powershell
+            s = subprocess.check_output(['powershell','-c','get-netroute -addressfamily ipv4 | %{$_.destinationprefix} | select -unique | select-string -notmatch -pattern "/32|/0" | %{$_.tostring()}'])
+            networks = nonroutable(to_str(s).splitlines())
+        else:
+            # Otherwise ask 'ip route'
+            s = subprocess.check_output("ip -4 route show scope link".split())
+            networks = nonroutable([l.split()[0] for l in to_str(s).splitlines()])
+    except:
+        pass
+
+    if not networks:
+        # Try getaddrinfo
+        s = socket.getaddrinfo(socket.gethostname(),0,2)
+        networks = nonroutable(["%s/24" % l[4][0] for l in s]) # assume all are /24
+
+    if not networks:
+        # Try making a dummy udp connection and see what the source address is
+        sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+        sock.connect(("8.8.8.8",1))
+        networks = nonroutable([sock.getsockname()[0]+"/24"]) # assume /24
+        sock.close()
+
+    if not networks:
+        raise Exception("Can't find local IPv4 networks, please specify on the command line")
+
+try:
+    print("Scanning", ", ".join(networks), "for %s servers..." % ("VNC" if scanvnc else "SSH",), file=sys.stderr)
+
+    total = sum([1 << (32 - int((s+"/32").split("/")[1])) for s in networks])
+    minutes = (total * (timeout + .05)) / (concurrent * 60) # assume 50 mS overhead per connect
+    if minutes > 1: print("Warning, scanning %d hosts may take over %d %s!" % (total, minutes, "minutes" if minutes >= 2 else "minute"), file=sys.stderr)
+
+    threads={}
+    for n in networks:
+        for ip in netlist(n):
+            t = threading.Thread(target=scan, args=(ip, 5900 if scanvnc else 22))
+            t.start()
+            threads[ip] = t
+            while len(threads) >= concurrent:
+                for k in list(threads):
+                    if not threads[k].is_alive():
+                        del threads[k]
+
+    # wait for remaining threads to die
+    while len(threads):
+        for k in list(threads):
+            if not threads[k].is_alive(): del threads[k]
+
+    print((found or "No"), ("server" if found == 1 else "servers"), "found", file=sys.stderr)
+    exit(found == 0)
+
+except KeyboardInterrupt:
+    print()
+    exit(1)
+
+except Exception:
+    traceback.print_exc()
+    exit(1)
