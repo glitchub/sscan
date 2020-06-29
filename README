@@ -1,8 +1,42 @@
-A simple python3 script to quickly scan subnets for active SSH or VNC servers.
+Usage:
 
-You may specify specific IPs and CIDR subnets on the command line, otherwise
-sscan will try various techniques to identify locally connected subnets and
-scan those.
+    sscan [options] [address[/prefix] [... address[/prefix]]
+
+Quickly scan subnets for active SSH, VNC, and other TCP servers.
+
+Options are:
+
+    -b mS   - milliseconds to wait for banner text, 0 to disable (default 1000)
+    -c mS   - milliseconds to wait for server connect (default 200)
+    -e      - show estimated scan time (default, show only if scan will exceed 1 minute)
+    -h      - show this text
+    -n N    - number of concurrent server connections (default 64)
+    -p port - TCP port to scan (default 22)
+    -v      - alias for '-p5900', search for VNC servers instead of SSH
+
+Subnets are specified in CIDR format "address/prefix". The "/prefix" is
+optional, if not specified then the default is "/32" (i.e. just scan that one
+IP address).
+
+If no subnets are specified, sscan will attempt to determine locally attached
+subnets and scan those.
+
+If some hosts are not detected or intermittently detected, try increasing the
+server connect timeout.
+
+If strange networking errors occur, or the program complains about too many
+open file handles, try reducing the number of concurrent connections.
+
+The overall scan time can by *significantly* reduced by decreasing the server
+connect timeout and/or increasing the number of concurrent connections, but
+note this may provoke the issues described above.
+
+Exit status is 0 if at least one host responded to the scan.
+
+Responding IPs are printed to stdout, followed by the first line of header text
+(unless -h0 was specified). All other messages go to stderr.
+
+Tested on Linux and Windows, also should work with python2.
 
 Examples:
 
@@ -15,14 +49,6 @@ Examples:
 
     $ ./sscan -v 10.0.0.0/18 192.168.0.5
     Scanning 10.0.0.0/18, 192.168.0.5 for VNC servers...
-    Warning, scanning 16385 hosts may take over 1 minute!
+    Estimated time to scan 16385 hosts: 60.16 seconds
       192.168.0.5     : RFB 003.008
-
-The nominal scan rate is 256 hosts per second, a warning is printed if the
-projected scan time exceeds one minute.
-
-Responding IPs are printed to stdout, all other messages go to stderr.
-
-Exit status 0 if at least one host is identified, or 1 if no hosts (or an error).
-
-Tested on Linux and Windows, also should work with python2.
+    1 server found
