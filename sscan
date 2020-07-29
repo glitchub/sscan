@@ -198,9 +198,9 @@ except Exception as e:
 
 # Determine subnets to scan
 
+cidrs=[]
 if args:
     # Passed in args
-    cidrs=[]
     for n in args:
         ad, nm = (n+"/32").split('/')[:2]
         assert 0 < int(nm) <= 32
@@ -218,7 +218,7 @@ else:
             s = subprocess.check_output(['powershell','-c','get-netroute -addressfamily ipv4 | %{$_.destinationprefix} | select -unique | select-string -notmatch -pattern "/32|/0" | %{$_.tostring()}'])
             cidrs = nonroutable(to_str(s).splitlines())
         else:
-            # Otherwise ask 'ip route'
+            # Otherwise ask 'ip route' (fails on RH unless root)
             s = subprocess.check_output("ip -4 route show scope link".split())
             cidrs = nonroutable([l.split()[0] for l in to_str(s).splitlines()])
     except:
