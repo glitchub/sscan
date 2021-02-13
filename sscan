@@ -31,10 +31,10 @@ Usage:
 
 Options:
 
-    -b mS   - milliseconds to wait for banner text, 0 to disable (default 1000)
+    -b mS   - milliseconds to wait for banner text, 0 to disable (default 2000)
     -c mS   - milliseconds to wait for server connect (default 250)
     -h      - show this text
-    -n N    - number of concurrent server connections (default 512)
+    -n N    - number of concurrent server connections (default 64)
     -p port - TCP port to scan (default 22)
     -v      - alias for '-p5900', search for VNC servers instead of SSH
 
@@ -48,12 +48,6 @@ Responding IPs are printed to stdout, followed by the first line of banner text
 (unless -b0 was specified). All other messages go to stderr.
 
 Exit status is 0 if at least one host responded to the scan.
-
-If some hosts are not detected or intermittently detected, try increasing the
-server connect timeout.
-
-If strange networking errors occur, or the program spews complaints about too
-many open file handles, try reducing the number of concurrent connections.
 
 Examples:
 
@@ -168,7 +162,7 @@ def cidr_compress(ipns):
 # Parse args command line args
 connect = 250       # mS to wait for connect
 banner = 2000       # mS to wait for banner text
-concurrent = 512    # number of concurrent connections
+concurrent = 64     # number of concurrent connections
 port = 22           # port to be scanned
 try:
     opts, args = getopt.getopt(sys.argv[1:], "b:c:hn:p:v")
@@ -208,36 +202,37 @@ if args:
 else:
     # Try to figure it out
 
-    # Filter list for "non-routable" address blocks
-    allow=("10.", "192.168.") + tuple(["172.%d." % n for n in range(16,32)])
-    def nonroutable(l): return [n for n in l if n.startswith(allow)]
+    # Filter list for "non-routable" address blocks smaller than /16
+    prefixes=tuple(["10.", "192.168."] + ["172.%d." % n for n in range(16,32)])
+    suffixes=tuple(["/%d" % n for n in range(17,33)])
+    def allow(l): return [n for n in l if n.startswith(prefixes) and n.endswith(suffixes) ]
 
     try:
         if platform.system().lower().startswith(("windows","cygwin")):
             # On windows, ask powershell
             s = subprocess.check_output(['powershell','-c','get-netroute -addressfamily ipv4 | %{$_.destinationprefix} | select -unique | select-string -notmatch -pattern "/32|/0" | %{$_.tostring()}'])
-            cidrs = nonroutable(to_str(s).splitlines())
+            cidrs = allow(to_str(s).splitlines())
         else:
             # Otherwise ask 'ip route' (fails on RH unless root)
             s = subprocess.check_output("ip -4 route show scope link".split())
-            cidrs = nonroutable([l.split()[0] for l in to_str(s).splitlines()])
+            cidrs = allow([l.split()[0] for l in to_str(s).splitlines()])
     except:
         pass
 
     if not cidrs:
         # Try getaddrinfo
         s = socket.getaddrinfo(socket.gethostname(),0,2)
-        cidrs = nonroutable(["%s/24" % l[4][0] for l in s]) # assume all are /24
+        cidrs = allow(["%s/24" % l[4][0] for l in s]) # assume all are /24
 
     if not cidrs:
         # Try making a dummy udp connection and see what the source address is
         sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
         sock.connect(("8.8.8.8",1))
-        cidrs = nonroutable([sock.getsockname()[0]+"/24"]) # assume /24
+        cidrs = allow([sock.getsockname()[0]+"/24"]) # assume /24
         sock.close()
 
     if not cidrs:
-        raise Exception("Can't find local IPv4 subnets, please specify on the command line")
+        raise Exception("Can't find suitable IPv4 subnets, please specify on the command line")
 
 # expand cidr subnets to integer IPs
 ipns = cidr_expand(cidrs)

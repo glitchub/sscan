@@ -6,10 +6,10 @@ Usage:
 
 Options:
 
-    -b mS   - milliseconds to wait for banner text, 0 to disable (default 1000)
+    -b mS   - milliseconds to wait for banner text, 0 to disable (default 2000)
     -c mS   - milliseconds to wait for server connect (default 250)
     -h      - show this text
-    -n N    - number of concurrent server connections (default 512)
+    -n N    - number of concurrent server connections (default 64)
     -p port - TCP port to scan (default 22)
     -v      - alias for '-p5900', search for VNC servers instead of SSH
 
@@ -23,12 +23,6 @@ Responding IPs are printed to stdout, followed by the first line of banner text
 (unless -b0 was specified). All other messages go to stderr.
 
 Exit status is 0 if at least one host responded to the scan.
-
-If some hosts are not detected or intermittently detected, try increasing the
-server connect timeout.
-
-If strange networking errors occur, or the program spews complaints about too
-many open file handles, try reducing the number of concurrent connections.
 
 Examples:
 
